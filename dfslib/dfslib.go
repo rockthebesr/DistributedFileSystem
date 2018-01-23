@@ -11,6 +11,7 @@ package dfslib
 import "fmt"
 
 import "net/rpc"
+import "net"
 
 // A Chunk is the unit of reading/writing in DFS.
 type Chunk [32]byte
@@ -167,7 +168,7 @@ type DFS interface {
 //DFSInstance is an instance of the DFS lib
 type DFSInstance struct {
 	isConnected              bool
-	localClient              *rpc.Client
+	server                   *rpc.Client
 	localPath                string
 	localIP                  string
 	localFiles               []string
@@ -190,6 +191,8 @@ func (dfs DFSInstance) UMountDFS() (err error) {
 	return nil
 }
 
+type Listener int
+
 // The constructor for a new DFS object instance. Takes the server's
 // IP:port address string as parameter, the localIP to use to
 // establish the connection to the server, and a localPath path on the
@@ -206,11 +209,27 @@ func (dfs DFSInstance) UMountDFS() (err error) {
 // Can return the following errors:
 // - LocalPathError
 // - Networking errors related to localIP or serverAddr
+type clientInfo struct {
+	clientId int
+	clientIp string
+}
+
+type callClientReply struct {
+	connected bool
+}
+
 func MountDFS(serverAddr string, localIP string, localPath string) (dfs DFS, err error) {
 	// TODO
 	// For now return LocalPathError
-	client, err := rpc.Dial("tcp", serverAddr)
+	tcpAddr, err := net.ResolveTCPAddr("tcp", localIP+":0")
+	conn, err := net.Listen("tcp", tcpAddr.String())
+	listener := new(Listener)
+	rpc.Register(listener)
+	go rpc.Accept(conn)
+	server, err := rpc.Dial("tcp", serverAddr)
+	var reply callClientReply
+	server.Call("server.callClient", clientInfo{clientId: 123, clientIp: tcpAddr.String()}, &reply)
 	isConnected := err != nil
-	localDFSInstance := DFSInstance{isConnected: isConnected, localClient: client}
+	localDFSInstance := DFSInstance{isConnected: isConnected, server: server}
 	return localDFSInstance, LocalPathError(localPath)
 }

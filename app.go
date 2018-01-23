@@ -7,7 +7,7 @@ Usage:
 go run app.go
 */
 
-package main
+package app
 
 // Expects dfslib.go to be in the ./dfslib/ dir, relative to
 // this app.go file
