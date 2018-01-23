@@ -10,6 +10,8 @@ package dfslib
 
 import "fmt"
 
+import "net/rpc"
+
 // A Chunk is the unit of reading/writing in DFS.
 type Chunk [32]byte
 
@@ -162,6 +164,32 @@ type DFS interface {
 	UMountDFS() (err error)
 }
 
+//DFSInstance is an instance of the DFS lib
+type DFSInstance struct {
+	isConnected              bool
+	localClient              *rpc.Client
+	localPath                string
+	localIP                  string
+	localFiles               []string
+	localFileToChunkVersions map[string][]int
+}
+
+func (dfs DFSInstance) LocalFileExists(fname string) (exists bool, err error) {
+	return true, nil
+}
+
+func (dfs DFSInstance) GlobalFileExists(fname string) (exists bool, err error) {
+	return true, nil
+}
+
+func (dfs DFSInstance) Open(fname string, mode FileMode) (f DFSFile, err error) {
+	return nil, nil
+}
+
+func (dfs DFSInstance) UMountDFS() (err error) {
+	return nil
+}
+
 // The constructor for a new DFS object instance. Takes the server's
 // IP:port address string as parameter, the localIP to use to
 // establish the connection to the server, and a localPath path on the
@@ -181,5 +209,8 @@ type DFS interface {
 func MountDFS(serverAddr string, localIP string, localPath string) (dfs DFS, err error) {
 	// TODO
 	// For now return LocalPathError
-	return nil, LocalPathError(localPath)
+	client, err := rpc.Dial("tcp", serverAddr)
+	isConnected := err != nil
+	localDFSInstance := DFSInstance{isConnected: isConnected, localClient: client}
+	return localDFSInstance, LocalPathError(localPath)
 }
