@@ -23,11 +23,12 @@ type Server struct {
 
 func callClient(ci clientInfo) callClientReply {
 	fmt.Println("calling client")
+	return callClientReply{connected: true}
 }
 
 func main() {
 	fmt.Println("Starting server")
-	server = rpc.NewServer()
+	server := rpc.NewServer()
 	dfsServer := new(Server)
 	server.RegisterName("server", dfsServer)
 	l, e := net.Listen("tcp", ":8080")
