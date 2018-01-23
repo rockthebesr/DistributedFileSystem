@@ -23,7 +23,6 @@ type Server struct {
 
 func callClient(ci clientInfo) callClientReply {
 	fmt.Println("calling client")
-	client := rpc.Dial("tcp", clientInfo.clientIp)
 }
 
 func main() {
