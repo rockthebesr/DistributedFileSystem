@@ -2,8 +2,9 @@ package main
 
 import (
 	"fmt"
+	"log"
+	"net"
 	"net/rpc"
-	"net/http"
 )
 
 type clientInfo struct {
@@ -30,7 +31,7 @@ func main() {
 	server = rpc.NewServer()
 	dfsServer := new(Server)
 	server.RegisterName("server", dfsServer)
-	l, e:= net.Listen("tcp", ":8080")
+	l, e := net.Listen("tcp", ":8080")
 	if e != nil {
 		log.Fatal("listen error:", e)
 	}
