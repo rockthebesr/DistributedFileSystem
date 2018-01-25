@@ -5,19 +5,12 @@ import (
 	"log"
 	"net"
 	"net/rpc"
+
+	"./shared"
 )
 
-type ClientInfo struct {
-	ClientID int
-	ClientIP string
-}
-
-type Reply struct {
-	Connected bool
-}
-
 type Server interface {
-	CallClient(ci ClientInfo) Reply
+	CallClient(ci shared.ClientInfo) shared.Reply
 }
 type ServerStruct struct {
 	Client                    *rpc.Client
@@ -25,17 +18,17 @@ type ServerStruct struct {
 	GlobalFileToChunkVersions map[string][]int
 }
 
-func (s *ServerStruct) CallClient(args *ClientInfo, reply *Reply) error {
+func (s *ServerStruct) CallClient(args *shared.ClientInfo, reply *shared.Reply) error {
 	fmt.Println("calling client" + args.ClientIP)
 	client, err := rpc.Dial("tcp", args.ClientIP)
 	if err != nil {
 		fmt.Println(err.Error())
 	}
 	s.Client = client
-	newReply := Reply{Connected: false}
+	newReply := shared.Reply{Connected: false}
 	err = client.Call("ClientStruct.PrintClientID", args, &newReply)
 	fmt.Println(newReply.Connected)
-	*reply = Reply{true}
+	*reply = shared.Reply{true}
 	return nil
 }
 

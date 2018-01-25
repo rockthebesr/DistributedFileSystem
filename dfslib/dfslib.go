@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"net"
 	"net/rpc"
+
+	"../shared"
 )
 
 // A Chunk is the unit of reading/writing in DFS.
@@ -197,24 +199,15 @@ var existDFSInstance *DFSInstance
 
 type Listener int
 
-type ClientInfo struct {
-	ClientID int
-	ClientIP string
-}
-
-type Reply struct {
-	Connected bool
-}
-
 type Client interface {
-	PrintClientID(ci ClientInfo) Reply
+	PrintClientID(ci shared.ClientInfo) shared.Reply
 }
 
 type ClientStruct struct {
 	ClientID int
 }
 
-func (s *ClientStruct) PrintClientID(args *ClientInfo, reply *Reply) error {
+func (s *ClientStruct) PrintClientID(args *shared.ClientInfo, reply *shared.Reply) error {
 	fmt.Println(args.ClientID)
 	reply.Connected = true
 	return nil
@@ -251,8 +244,8 @@ func MountDFS(serverAddr string, localIP string, localPath string) (dfs DFS, err
 	go rpc.Accept(conn)
 	server, err := rpc.Dial("tcp", serverAddr)
 
-	var rep Reply
-	server.Call("ServerStruct.CallClient", ClientInfo{ClientID: 1, ClientIP: tcpAddr.String()}, &rep)
+	var rep shared.Reply
+	server.Call("ServerStruct.CallClient", shared.ClientInfo{ClientID: 1, ClientIP: tcpAddr.String()}, &rep)
 	fmt.Println("called server now")
 	isConnected := err != nil
 	localDFSInstance := DFSInstance{IsConnected: isConnected, Server: server}
