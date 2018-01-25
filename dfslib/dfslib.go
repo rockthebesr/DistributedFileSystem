@@ -207,8 +207,9 @@ type ClientStruct struct {
 	ClientID int
 }
 
-func (s *ClientStruct) PrintClientID(args *shared.ClientInfo, reply *shared.Reply) error {
-	fmt.Println(args.ClientID)
+func (s *ClientStruct) PrintClientID(id int, reply *shared.Reply) error {
+	s.ClientID = id
+	fmt.Println(s.ClientID)
 	reply.Connected = true
 	return nil
 }
@@ -245,7 +246,7 @@ func MountDFS(serverAddr string, localIP string, localPath string) (dfs DFS, err
 	server, err := rpc.Dial("tcp", serverAddr)
 
 	var rep shared.Reply
-	server.Call("ServerStruct.CallClient", shared.ClientInfo{ClientID: 1, ClientIP: tcpAddr.String()}, &rep)
+	server.Call("ServerStruct.CallClient", shared.ClientInfo{ClientLocalPath: localPath, ClientIP: tcpAddr.String()}, &rep)
 	fmt.Println("called server now")
 	isConnected := err != nil
 	localDFSInstance := DFSInstance{IsConnected: isConnected, Server: server}

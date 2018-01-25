@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"math/rand"
 	"net"
 	"net/rpc"
 
@@ -13,27 +14,45 @@ type Server interface {
 	CallClient(ci shared.ClientInfo) shared.Reply
 }
 type ServerStruct struct {
+	ClientInfoToClientID      map[shared.ClientInfo]int
 	Client                    *rpc.Client
 	GlobalFilesToClients      []string
 	GlobalFileToChunkVersions map[string][]int
 }
 
 func (s *ServerStruct) CallClient(args *shared.ClientInfo, reply *shared.Reply) error {
-	fmt.Println("calling client" + args.ClientIP)
 	client, err := rpc.Dial("tcp", args.ClientIP)
 	if err != nil {
 		fmt.Println(err.Error())
 	}
 	s.Client = client
 	newReply := shared.Reply{Connected: false}
-	err = client.Call("ClientStruct.PrintClientID", args, &newReply)
-	fmt.Println(newReply.Connected)
+	for clientInfo, id := range s.ClientInfoToClientID {
+		if clientInfo.ClientLocalPath == args.ClientLocalPath && clientInfo.ClientIP == args.ClientIP {
+
+			// fmt.Println("args")
+			// fmt.Println(args.ClientIP)
+			// fmt.Println(args.ClientLocalPath)
+			// fmt.Println("clientInfo")
+			// fmt.Println(clientInfo.ClientIP)
+			// fmt.Println(clientInfo.ClientLocalPath)
+			client.Call("ClientStruct.PrintClientID", id, &newReply)
+			// fmt.Println("Exisiting ID: ")
+			// fmt.Println(id)
+			*reply = shared.Reply{true}
+			return nil
+		}
+	}
+	newID := rand.Int()
+	s.ClientInfoToClientID[*args] = newID
+	client.Call("ClientStruct.PrintClientID", newID, &newReply)
 	*reply = shared.Reply{true}
 	return nil
 }
 
 func main() {
 	dfsServer := new(ServerStruct)
+	dfsServer.ClientInfoToClientID = map[shared.ClientInfo]int{}
 	// server := rpc.NewServer()
 	rpc.RegisterName("ServerStruct", dfsServer)
 	l, e := net.Listen("tcp", ":8080")
