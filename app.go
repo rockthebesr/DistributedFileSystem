@@ -17,54 +17,54 @@ import "fmt"
 import "os"
 
 func main() {
-	serverAddr := "127.0.0.1:8080"
-	localIP := "127.0.0.1"
+	serverAddr := "0.0.0.0:8080"
+	localIP := "0.0.0.0"
 	localPath := "/tmp/dfs-dev/"
 
 	// Connect to DFS.
-	dfs, err := dfslib.MountDFS(serverAddr, localIP, localPath)
-	if checkError(err) != nil {
-		return
-	}
+	_, _ = dfslib.MountDFS(serverAddr, localIP, localPath)
+	// if checkError(err) != nil {
+	// 	return
+	// }
 
-	// Close the DFS on exit.
-	// Defers are really cool, check out: https://blog.golang.org/defer-panic-and-recover
-	defer dfs.UMountDFS()
+	// // Close the DFS on exit.
+	// // Defers are really cool, check out: https://blog.golang.org/defer-panic-and-recover
+	// defer dfs.UMountDFS()
 
-	// Check if hello.txt file exists in the global DFS.
-	exists, err := dfs.GlobalFileExists("helloworld")
-	if checkError(err) != nil {
-		return
-	}
+	// // Check if hello.txt file exists in the global DFS.
+	// exists, err := dfs.GlobalFileExists("helloworld")
+	// if checkError(err) != nil {
+	// 	return
+	// }
 
-	if exists {
-		fmt.Println("File already exists, mission accomplished")
-		return
-	}
+	// if exists {
+	// 	fmt.Println("File already exists, mission accomplished")
+	// 	return
+	// }
 
-	// Open the file (and create it if it does not exist) for writing.
-	f, err := dfs.Open("helloworld", dfslib.WRITE)
-	if checkError(err) != nil {
-		return
-	}
+	// // Open the file (and create it if it does not exist) for writing.
+	// f, err := dfs.Open("helloworld", dfslib.WRITE)
+	// if checkError(err) != nil {
+	// 	return
+	// }
 
-	// Close the file on exit.
-	defer f.Close()
+	// // Close the file on exit.
+	// defer f.Close()
 
-	// Create a chunk with a string message.
-	var chunk dfslib.Chunk
-	const str = "Hello friends!"
-	copy(chunk[:], str)
+	// // Create a chunk with a string message.
+	// var chunk dfslib.Chunk
+	// const str = "Hello friends!"
+	// copy(chunk[:], str)
 
-	// Write the 0th chunk of the file.
-	err = f.Write(0, &chunk)
-	if checkError(err) != nil {
-		return
-	}
+	// // Write the 0th chunk of the file.
+	// err = f.Write(0, &chunk)
+	// if checkError(err) != nil {
+	// 	return
+	// }
 
-	// Read the 0th chunk of the file.
-	err = f.Read(0, &chunk)
-	checkError(err)
+	// // Read the 0th chunk of the file.
+	// err = f.Read(0, &chunk)
+	// checkError(err)
 }
 
 // If error is non-nil, print it out and return it.

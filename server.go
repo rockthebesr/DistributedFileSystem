@@ -7,33 +7,50 @@ import (
 	"net/rpc"
 )
 
-type clientInfo struct {
-	clientId int
-	clientIp string
+type ClientInfo struct {
+	ClientID int
+	ClientIP string
 }
 
-type callClientReply struct {
-	connected bool
+type Reply struct {
+	Connected bool
 }
 
-type Server struct {
-	globalFilesToClients      []string
-	globalFileToChunkVersions map[string][]int
+type Server interface {
+	CallClient(ci ClientInfo) Reply
+}
+type ServerStruct struct {
+	Client                    *rpc.Client
+	GlobalFilesToClients      []string
+	GlobalFileToChunkVersions map[string][]int
 }
 
-func callClient(ci clientInfo) callClientReply {
-	fmt.Println("calling client")
-	return callClientReply{connected: true}
+func (s *ServerStruct) CallClient(args *ClientInfo, reply *Reply) error {
+	fmt.Println("calling client" + args.ClientIP)
+	client, err := rpc.Dial("tcp", args.ClientIP)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+	s.Client = client
+	newReply := Reply{Connected: false}
+	err = client.Call("ClientStruct.PrintClientID", args, &newReply)
+	fmt.Println(newReply.Connected)
+	*reply = Reply{true}
+	return nil
 }
 
 func main() {
-	fmt.Println("Starting server")
-	server := rpc.NewServer()
-	dfsServer := new(Server)
-	server.RegisterName("server", dfsServer)
+	dfsServer := new(ServerStruct)
+	// server := rpc.NewServer()
+	rpc.RegisterName("ServerStruct", dfsServer)
 	l, e := net.Listen("tcp", ":8080")
+
+	fmt.Println("Starting server" + l.Addr().String())
 	if e != nil {
 		log.Fatal("listen error:", e)
 	}
-	go server.Accept(l)
+	for {
+		conn, _ := l.Accept()
+		rpc.ServeConn(conn)
+	}
 }

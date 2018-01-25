@@ -8,10 +8,11 @@ file system (DFS) system to be used in assignment 2 of UBC CS 416
 
 package dfslib
 
-import "fmt"
-
-import "net/rpc"
-import "net"
+import (
+	"fmt"
+	"net"
+	"net/rpc"
+)
 
 // A Chunk is the unit of reading/writing in DFS.
 type Chunk [32]byte
@@ -167,12 +168,13 @@ type DFS interface {
 
 //DFSInstance is an instance of the DFS lib
 type DFSInstance struct {
-	isConnected              bool
-	server                   *rpc.Client
-	localPath                string
-	localIP                  string
-	localFiles               []string
-	localFileToChunkVersions map[string][]int
+	ClientID                 int
+	IsConnected              bool
+	Server                   *rpc.Client
+	LocalPath                string
+	LocalIP                  string
+	LocalFiles               []string
+	LocalFileToChunkVersions map[string][]int
 }
 
 func (dfs DFSInstance) LocalFileExists(fname string) (exists bool, err error) {
@@ -191,7 +193,32 @@ func (dfs DFSInstance) UMountDFS() (err error) {
 	return nil
 }
 
+var existDFSInstance *DFSInstance
+
 type Listener int
+
+type ClientInfo struct {
+	ClientID int
+	ClientIP string
+}
+
+type Reply struct {
+	Connected bool
+}
+
+type Client interface {
+	PrintClientID(ci ClientInfo) Reply
+}
+
+type ClientStruct struct {
+	ClientID int
+}
+
+func (s *ClientStruct) PrintClientID(args *ClientInfo, reply *Reply) error {
+	fmt.Println(args.ClientID)
+	reply.Connected = true
+	return nil
+}
 
 // The constructor for a new DFS object instance. Takes the server's
 // IP:port address string as parameter, the localIP to use to
@@ -209,27 +236,26 @@ type Listener int
 // Can return the following errors:
 // - LocalPathError
 // - Networking errors related to localIP or serverAddr
-type clientInfo struct {
-	clientId int
-	clientIp string
-}
-
-type callClientReply struct {
-	connected bool
-}
 
 func MountDFS(serverAddr string, localIP string, localPath string) (dfs DFS, err error) {
 	// TODO
 	// For now return LocalPathError
-	tcpAddr, err := net.ResolveTCPAddr("tcp", localIP+":0")
+	// if dfs instance already exists
+	if existDFSInstance != nil {
+		return existDFSInstance, nil
+	}
+	tcpAddr, err := net.ResolveTCPAddr("tcp", localIP+":1111")
 	conn, err := net.Listen("tcp", tcpAddr.String())
-	listener := new(Listener)
-	rpc.Register(listener)
+	client := new(ClientStruct)
+	rpc.RegisterName("ClientStruct", client)
 	go rpc.Accept(conn)
 	server, err := rpc.Dial("tcp", serverAddr)
-	var reply callClientReply
-	server.Call("server.callClient", clientInfo{clientId: 123, clientIp: tcpAddr.String()}, &reply)
+
+	var rep Reply
+	server.Call("ServerStruct.CallClient", ClientInfo{ClientID: 1, ClientIP: tcpAddr.String()}, &rep)
+	fmt.Println("called server now")
 	isConnected := err != nil
-	localDFSInstance := DFSInstance{isConnected: isConnected, server: server}
-	return localDFSInstance, LocalPathError(localPath)
+	localDFSInstance := DFSInstance{IsConnected: isConnected, Server: server}
+	return localDFSInstance, nil
+
 }
