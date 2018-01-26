@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"net"
 	"net/rpc"
+	"os"
+	"unicode"
 
 	"../shared"
 )
@@ -134,6 +136,22 @@ type DFSFile interface {
 	Close() (err error)
 }
 
+type DFSFileStruct struct {
+	file *os.File
+}
+
+func (file DFSFileStruct) Read(chunkNum uint8, chunk *Chunk) (err error) {
+	return nil
+}
+
+func (file DFSFileStruct) Write(chunkNum uint8, chunk *Chunk) (err error) {
+	return nil
+}
+
+func (file DFSFileStruct) Close() (err error) {
+	return nil
+}
+
 // Represents a connection to the DFS system.
 type DFS interface {
 	// Check if a file with filename fname exists locally (i.e.,
@@ -179,20 +197,98 @@ type DFSInstance struct {
 	LocalFileToChunkVersions map[string][]int
 }
 
+func Exists(path string) bool {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true
+	}
+	if os.IsNotExist(err) {
+		return false
+	}
+	return true
+}
+
+func GoodFileName(name string) bool {
+	if len(name) < 1 || len(name) > 16 {
+		return false
+	}
+	for _, r := range name {
+		if !unicode.IsLetter(r) && !unicode.IsNumber(r) {
+			return false
+		}
+	}
+	return true
+}
+
 func (dfs DFSInstance) LocalFileExists(fname string) (exists bool, err error) {
-	return true, nil
+	if !GoodFileName(fname) {
+		return false, BadFilenameError(fname)
+	}
+	if Exists(dfs.LocalPath + fname + ".dfs") {
+		return true, nil
+	}
+	return false, FileDoesNotExistError(fname)
 }
 
 func (dfs DFSInstance) GlobalFileExists(fname string) (exists bool, err error) {
-	return true, nil
+	if !GoodFileName(fname) {
+		return false, BadFilenameError(fname)
+	}
+	args := shared.FileName{fname}
+	reply := shared.FileExists{false}
+	dfs.Server.Call("ServerStruct.GlobalFileExists", args, &reply)
+	if reply.FileExists {
+		return true, nil
+	}
+	return false, FileDoesNotExistError(fname)
 }
 
+// Opens a filename with name fname using mode. Creates the file
+// in READ/WRITE modes if it does not exist. Returns a handle to
+// the file through which other operations on this file can be
+// made.
+//
+// Can return the following errors:
+// - OpenWriteConflictError (in WRITE mode)
+// - DisconnectedError (in READ,WRITE modes)
+// - FileUnavailableError (in READ,WRITE modes)
+// - FileDoesNotExistError (in DREAD mode)
+// - BadFilenameError (if filename contains non alpha-numeric chars or is not 1-16 chars long)
+
 func (dfs DFSInstance) Open(fname string, mode FileMode) (f DFSFile, err error) {
+	if !GoodFileName(fname) {
+		return nil, BadFilenameError(fname)
+	}
+	switch mode {
+	case READ:
+		fmt.Println("open read new file called")
+		//check if file exists globally
+		fileExists, _ := dfs.GlobalFileExists(fname)
+		if !fileExists {
+			file, err := os.Create(dfs.LocalPath + fname + ".dfs")
+			if err != nil {
+				fmt.Println(err)
+			}
+			bytes := make([]byte, 256*32)
+			file.Write(bytes)
+			dfs.NotifyNewFile(fname)
+			return DFSFileStruct{file: file}, nil
+		}
+	case WRITE:
+	case DREAD:
+	}
+
 	return nil, nil
 }
 
 func (dfs DFSInstance) UMountDFS() (err error) {
 	return nil
+}
+
+func (dfs DFSInstance) NotifyNewFile(fileName string) {
+	args := shared.NotifyNewFile{FileName: fileName, ClientID: dfs.ClientID}
+	reply := shared.Reply{false}
+	dfs.Server.Call("ServerStruct.NotifyNewFile", args, &reply)
 }
 
 var existDFSInstance *DFSInstance
@@ -235,8 +331,12 @@ func MountDFS(serverAddr string, localIP string, localPath string) (dfs DFS, err
 	// TODO
 	// For now return LocalPathError
 	// if dfs instance already exists
+
 	if existDFSInstance != nil {
 		return existDFSInstance, nil
+	}
+	if !Exists(localPath) {
+		return nil, LocalPathError(localPath)
 	}
 	tcpAddr, err := net.ResolveTCPAddr("tcp", localIP+":1111")
 	conn, err := net.Listen("tcp", tcpAddr.String())
@@ -249,7 +349,8 @@ func MountDFS(serverAddr string, localIP string, localPath string) (dfs DFS, err
 	server.Call("ServerStruct.CallClient", shared.ClientInfo{ClientLocalPath: localPath, ClientIP: tcpAddr.String()}, &rep)
 	fmt.Println("called server now")
 	isConnected := err != nil
-	localDFSInstance := DFSInstance{IsConnected: isConnected, Server: server}
+	localDFSInstance := DFSInstance{IsConnected: isConnected, Server: server, LocalIP: localIP, LocalPath: localPath}
+
 	return localDFSInstance, nil
 
 }

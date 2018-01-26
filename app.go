@@ -22,10 +22,11 @@ func main() {
 	localPath := "/tmp/dfs-dev/"
 
 	// Connect to DFS.
-	_, _ = dfslib.MountDFS(serverAddr, localIP, localPath)
-	// if checkError(err) != nil {
-	// 	return
-	// }
+	_, err := dfslib.MountDFS(serverAddr, localIP, localPath)
+	if checkError(err) != nil {
+		fmt.Println(err)
+		return
+	}
 
 	// // Close the DFS on exit.
 	// // Defers are really cool, check out: https://blog.golang.org/defer-panic-and-recover
