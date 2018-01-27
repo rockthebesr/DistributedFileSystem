@@ -10,6 +10,86 @@ import (
 	"./shared"
 )
 
+// A Chunk is the unit of reading/writing in DFS.
+type Chunk [32]byte
+
+// Represents a type of file access.
+type FileMode int
+
+const (
+	// Read mode.
+	READ FileMode = iota
+
+	// Read/Write mode.
+	WRITE
+
+	// Disconnected read mode.
+	DREAD
+)
+
+// Contains serverAddr
+type DisconnectedError string
+
+func (e DisconnectedError) Error() string {
+	return fmt.Sprintf("DFS: Not connnected to server [%s]", string(e))
+}
+
+// Contains chunkNum that is unavailable
+type ChunkUnavailableError uint8
+
+func (e ChunkUnavailableError) Error() string {
+	return fmt.Sprintf("DFS: Latest verson of chunk [%s] unavailable", string(e))
+}
+
+// Contains filename
+type OpenWriteConflictError string
+
+func (e OpenWriteConflictError) Error() string {
+	return fmt.Sprintf("DFS: Filename [%s] is opened for writing by another client", string(e))
+}
+
+// Contains file mode that is bad.
+type BadFileModeError FileMode
+
+func (e BadFileModeError) Error() string {
+	return fmt.Sprintf("DFS: Cannot perform this operation in current file mode [%s]", string(e))
+}
+
+// Contains filename.
+type WriteModeTimeoutError string
+
+func (e WriteModeTimeoutError) Error() string {
+	return fmt.Sprintf("DFS: Write access to filename [%s] has timed out; reopen the file", string(e))
+}
+
+// Contains filename
+type BadFilenameError string
+
+func (e BadFilenameError) Error() string {
+	return fmt.Sprintf("DFS: Filename [%s] includes illegal characters or has the wrong length", string(e))
+}
+
+// Contains filename
+type FileUnavailableError string
+
+func (e FileUnavailableError) Error() string {
+	return fmt.Sprintf("DFS: Filename [%s] is unavailable", string(e))
+}
+
+// Contains local path
+type LocalPathError string
+
+func (e LocalPathError) Error() string {
+	return fmt.Sprintf("DFS: Cannot access local path [%s]", string(e))
+}
+
+// Contains filename
+type FileDoesNotExistError string
+
+func (e FileDoesNotExistError) Error() string {
+	return fmt.Sprintf("DFS: Cannot open file [%s] in D mode as it does not exist locally", string(e))
+}
+
 type Server interface {
 	CallClient(ci shared.ClientInfo) shared.Reply
 	GlobalFileExists(args shared.FileName) shared.FileExists
@@ -20,6 +100,7 @@ type ServerStruct struct {
 	Client                     *rpc.Client
 	GlobalFilesToClientIDs     map[string][]int
 	GlobalFileToChunkVersions  map[string][]int
+	LockedFileToClientID       map[string]int
 }
 
 func (s *ServerStruct) CallClient(args *shared.ClientInfo, reply *shared.Reply) error {
@@ -44,7 +125,7 @@ func (s *ServerStruct) CallClient(args *shared.ClientInfo, reply *shared.Reply) 
 	return nil
 }
 
-func (s *ServerStruct) NotifyNewFile(args *shared.NotifyNewFile, reply *shared.Reply) error {
+func (s *ServerStruct) NotifyNewFile(args *shared.FileNameAndClientID, reply *shared.Reply) error {
 	fmt.Println("notify new file called")
 	if val, ok := s.GlobalFilesToClientIDs[args.FileName]; ok {
 		if !shared.Contains(val, args.ClientID) {
@@ -59,6 +140,23 @@ func (s *ServerStruct) NotifyNewFile(args *shared.NotifyNewFile, reply *shared.R
 		reply.Connected = true
 		return nil
 	}
+}
+
+func (s *ServerStruct) LockFile(args *shared.FileNameAndClientID, reply *shared.Reply) error {
+	fmt.Println("locking file " + args.FileName)
+	reply.Connected = true
+	if _, ok := s.LockedFileToClientID[args.FileName]; ok {
+		return OpenWriteConflictError(args.FileName)
+	} else {
+		s.LockedFileToClientID[args.FileName] = args.ClientID
+		return nil
+	}
+}
+
+func (s *ServerStruct) UnlockFileRPC(args *shared.FileNameAndClientID, reply *shared.Reply) error {
+	delete(s.LockedFileToClientID, args.FileName)
+	reply.Connected = true
+	return nil
 }
 
 func (s *ServerStruct) GlobalFileExists(args *shared.FileName, reply *shared.FileExists) error {
@@ -77,6 +175,7 @@ func main() {
 	dfsServer.ClientInfoToClientID = map[shared.ClientInfo]int{}
 	dfsServer.ClientIDToClientConnection = map[int]*rpc.Client{}
 	dfsServer.GlobalFilesToClientIDs = map[string][]int{}
+	dfsServer.LockedFileToClientID = map[string]int{}
 	// server := rpc.NewServer()
 	rpc.RegisterName("ServerStruct", dfsServer)
 	l, e := net.Listen("tcp", ":8080")

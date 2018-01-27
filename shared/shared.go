@@ -17,7 +17,7 @@ type FileExists struct {
 	FileExists bool
 }
 
-type NotifyNewFile struct {
+type FileNameAndClientID struct {
 	FileName string
 	ClientID int
 }
