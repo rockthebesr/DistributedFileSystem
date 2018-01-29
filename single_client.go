@@ -271,7 +271,7 @@ func main() {
 	}
 
 	serverAddr := os.Args[1]
-	localIP := "127.0.0.1" // you may want to change this when testing
+	localIP := "198.162.33.23" // you may want to change this when testing
 
 	// this creates a directory (to be used as localPath) for each client.
 	// The directories will have the format "./client{A,B}NNNNNNNNN", where
