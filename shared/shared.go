@@ -33,12 +33,12 @@ type FileNameAndChunkNumberAndClientID struct {
 }
 
 type FileData struct {
-	Data          [32 * 256]byte
+	FileData      [32 * 256]byte
 	ChunkVersions [256]int
 }
 
 type ChunkData struct {
-	Data [32]byte
+	ChunkData [32]byte
 }
 
 func Contains(s []int, e int) bool {

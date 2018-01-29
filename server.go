@@ -116,6 +116,7 @@ type ServerStruct struct {
 }
 
 func (s *ServerStruct) CallClient(args *shared.ClientInfo, reply *shared.Reply) error {
+
 	client, err := rpc.Dial("tcp", args.ClientIP)
 	if err != nil {
 		fmt.Println(err.Error())
@@ -123,16 +124,20 @@ func (s *ServerStruct) CallClient(args *shared.ClientInfo, reply *shared.Reply) 
 	newReply := shared.Reply{Connected: false}
 	for clientInfo, id := range s.ClientInfoToClientID {
 		if clientInfo.ClientLocalPath == args.ClientLocalPath && clientInfo.ClientIP == args.ClientIP {
+
+			fmt.Println("adding clientID " + strconv.Itoa(id))
 			client.Call("ClientStruct.PrintClientID", id, &newReply)
 			*reply = shared.Reply{true}
 			s.ClientIDToClientConnection[id] = client
 			return nil
 		}
 	}
+
 	newID := rand.Int()
 	s.ClientInfoToClientID[*args] = newID
 	s.ClientIDToClientConnection[newID] = client
 	client.Call("ClientStruct.PrintClientID", newID, &newReply)
+	fmt.Println("adding clientID " + strconv.Itoa(newID))
 	*reply = shared.Reply{true}
 	return nil
 }
@@ -152,11 +157,17 @@ func (s *ServerStruct) NotifyNewFile(args *shared.FileNameAndClientID, reply *sh
 	fmt.Println("notify new file called")
 	if _, ok := s.GlobalFileToChunksToClientIDs[args.FileName]; !ok {
 		fmt.Println("adding new global file " + args.FileName)
-		val := make([][]int, 256)
+		chunksToClientIDs := make([][]int, 256)
 		for i := 0; i < 256; i++ {
-			val[i] = make([]int, 0)
+			var ids []int
+			chunksToClientIDs[i] = ids
 		}
-		s.GlobalFileToChunksToClientIDs[args.FileName] = val
+		s.GlobalFileToChunksToClientIDs[args.FileName] = chunksToClientIDs
+
+		chunkVersions := make([]int, 256)
+		fileNameToChunkVersions := map[string][]int{}
+		fileNameToChunkVersions[args.FileName] = chunkVersions
+		s.ClientIDToFileNameToChunkVersions[args.ClientID] = fileNameToChunkVersions
 		reply.Connected = true
 		return nil
 	} else {
@@ -170,7 +181,10 @@ func (s *ServerStruct) NotifyNewFile(args *shared.FileNameAndClientID, reply *sh
 func (s *ServerStruct) NotifyChunkVersionUpdate(args *shared.FileNameAndChunkNumberAndClientID, reply *shared.Reply) error {
 	fmt.Println("updating file " + args.FileName + " chunk " + strconv.Itoa(args.ChunkNumber))
 	clientIDs := s.GlobalFileToChunksToClientIDs[args.FileName][args.ChunkNumber]
+	fmt.Println(strconv.Itoa(args.ClientID))
 	s.GlobalFileToChunksToClientIDs[args.FileName][args.ChunkNumber] = append(clientIDs, args.ClientID)
+	fmt.Println(s.GlobalFileToChunksToClientIDs[args.FileName][args.ChunkNumber])
+	fmt.Println(len(s.GlobalFileToChunksToClientIDs[args.FileName][args.ChunkNumber]))
 	s.ClientIDToFileNameToChunkVersions[args.ClientID][args.FileName][args.ChunkNumber] = len(s.GlobalFileToChunksToClientIDs[args.FileName][args.ChunkNumber])
 	reply.Connected = true
 	return nil
@@ -183,7 +197,7 @@ func (s *ServerStruct) GetLatestFileRPC(args *shared.FileNameAndClientID, reply 
 		return err
 	} else {
 		copy(reply.ChunkVersions[:], versions[0:256])
-		copy(reply.Data[0:8192], result[:])
+		copy(reply.FileData[0:8192], result[:])
 		return nil
 	}
 }
@@ -194,7 +208,7 @@ func (s *ServerStruct) GetLatestChunkRPC(args *shared.FileNameAndChunkNumberAndC
 	if err != nil {
 		return err
 	} else {
-		copy(reply.Data[0:32], result[:])
+		copy(reply.ChunkData[0:32], result[:])
 		s.ClientIDToFileNameToChunkVersions[args.ClientID][args.FileName][args.ChunkNumber] = version
 		return nil
 	}
@@ -220,20 +234,26 @@ func (s *ServerStruct) GetLatestChunk(fname string, chunkNumber int) ([32]byte, 
 	data := [32]byte{}
 	chunksToClientIDs := s.GlobalFileToChunksToClientIDs[fname]
 	latestClientIDs := chunksToClientIDs[chunkNumber]
+	if len(latestClientIDs) == 0 {
+		return data, 0, nil
+	}
 	for j := len(latestClientIDs) - 1; j >= 0; j-- {
+		// fmt.Println("latest updated client for file " + fname + " chunk " + strconv.Itoa(chunkNumber) + " is " + strconv.Itoa(latestClientIDs[j]))
 		if conn, ok := s.ClientIDToClientConnection[latestClientIDs[j]]; ok {
 			args := shared.FileNameAndChunkNumberAndClientID{fname, chunkNumber, latestClientIDs[j]}
-			reply := shared.ChunkData{Data: data}
-			err := conn.Call("ClientStruct.ReadChunk", args, reply)
+			reply := shared.ChunkData{ChunkData: data}
+			err := conn.Call("ClientStruct.ReadChunk", args, &reply)
 			if err != nil {
+				fmt.Println(err)
 				return [32]byte{}, 0, ChunkUnavailableError(chunkNumber)
 			} else {
-				return reply.Data, len(s.GlobalFileToChunksToClientIDs[fname][chunkNumber]), nil
+				return reply.ChunkData, len(s.GlobalFileToChunksToClientIDs[fname][chunkNumber]), nil
 			}
 		}
 	}
 
-	return [32]byte{}, 0, ChunkUnavailableError(chunkNumber)
+	fmt.Println("cant get latest chunk!")
+	return data, 0, ChunkUnavailableError(chunkNumber)
 }
 
 func (s *ServerStruct) LockFile(args *shared.FileNameAndClientID, reply *shared.Reply) error {
@@ -248,7 +268,10 @@ func (s *ServerStruct) LockFile(args *shared.FileNameAndClientID, reply *shared.
 }
 
 func (s *ServerStruct) UnlockFileRPC(args *shared.FileNameAndClientID, reply *shared.Reply) error {
-	delete(s.LockedFileToClientID, args.FileName)
+	if _, ok := s.LockedFileToClientID[args.FileName]; ok {
+		delete(s.LockedFileToClientID, args.FileName)
+	}
+	fmt.Println("unlocked file " + args.FileName)
 	reply.Connected = true
 	return nil
 }
