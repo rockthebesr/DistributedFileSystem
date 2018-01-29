@@ -117,16 +117,19 @@ type ServerStruct struct {
 }
 
 func (s *ServerStruct) CallClient(args *shared.ClientInfo, reply *shared.Reply) error {
-
-	client, err := rpc.Dial("tcp", args.ClientIP)
+	clientAddr, err := net.ResolveTCPAddr("tcp", args.ClientAddr)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+	client, err := rpc.Dial("tcp", clientAddr.String())
 	if err != nil {
 		fmt.Println(err.Error())
 	}
 	newReply := shared.Reply{Connected: false}
 	for clientInfo, id := range s.ClientInfoToClientID {
-		if clientInfo.ClientLocalPath == args.ClientLocalPath && clientInfo.ClientIP == args.ClientIP {
+		if clientInfo.ClientLocalPath == args.ClientLocalPath && clientInfo.ClientAddr == args.ClientAddr {
 
-			fmt.Println("adding clientID " + strconv.Itoa(id))
+			fmt.Println("adding existing clientID " + strconv.Itoa(id))
 			client.Call("ClientStruct.PrintClientID", id, &newReply)
 			*reply = shared.Reply{true}
 			s.ClientIDToClientConnection[id] = client
@@ -165,18 +168,17 @@ func (s *ServerStruct) NotifyNewFile(args *shared.FileNameAndClientID, reply *sh
 		}
 		s.GlobalFileToChunksToClientIDs[args.FileName] = chunksToClientIDs
 
-		chunkVersions := make([]int, 256)
-		fileNameToChunkVersions := map[string][]int{}
-		fileNameToChunkVersions[args.FileName] = chunkVersions
-		s.ClientIDToFileNameToChunkVersions[args.ClientID] = fileNameToChunkVersions
-		reply.Connected = true
-		return nil
 	} else {
 
 		fmt.Println(args.FileName + " did not add")
 		reply.Connected = true
-		return nil
 	}
+	chunkVersions := make([]int, 256)
+	fileNameToChunkVersions := map[string][]int{}
+	fileNameToChunkVersions[args.FileName] = chunkVersions
+	s.ClientIDToFileNameToChunkVersions[args.ClientID] = fileNameToChunkVersions
+	reply.Connected = true
+	return nil
 }
 
 func (s *ServerStruct) NotifyChunkVersionUpdate(args *shared.FileNameAndChunkNumberAndClientID, reply *shared.Reply) error {
@@ -299,14 +301,15 @@ func main() {
 	dfsServer.GlobalFileToChunksToClientIDs = map[string][][]int{}
 	dfsServer.LockedFileToClientID = map[string]int{}
 	rpc.RegisterName("ServerStruct", dfsServer)
-	l, e := net.Listen("tcp", serverIPAndPort.String())
 
-	fmt.Println("Starting server" + l.Addr().String())
+	fmt.Println("Starting server " + serverIPAndPort.String())
+
+	l, e := net.Listen("tcp", serverIPAndPort.String())
 	if e != nil {
 		log.Fatal("listen error:", e)
 	}
 	for {
 		conn, _ := l.Accept()
-		rpc.ServeConn(conn)
+		go rpc.ServeConn(conn)
 	}
 }

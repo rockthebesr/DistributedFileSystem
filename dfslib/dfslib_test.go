@@ -2,7 +2,6 @@ package dfslib
 
 import (
 	"fmt"
-	"os"
 	"testing"
 )
 
@@ -65,10 +64,10 @@ func TestOpenReadNewFile(*testing.T) {
 	fmt.Println(localResult)
 }
 
-func TestOpenWriteAndReadFile1(*testing.T) {
+func TestOpenWriteAndReadFile(*testing.T) {
 	serverAddr := "127.0.0.1:8080"
 	localIP := "127.0.0.1"
-	localPath := "/Users/luorock/Documents/UBCfolder/year4/cpsc416/a2_file_dir_1/"
+	localPath := "/Users/luorock/Documents/UBCfolder/year4/cpsc416/a2_file_dir_0/"
 	dfs, _ := MountDFS(serverAddr, localIP, localPath)
 	localResult, _ := dfs.LocalFileExists("helloworld")
 	if localResult {
@@ -91,8 +90,22 @@ func TestOpenWriteAndReadFile1(*testing.T) {
 		return
 	}
 	file.Close()
-	dfs.UMountDFS()
-	os.Remove("/Users/luorock/Documents/UBCfolder/year4/cpsc416/a2_file_dir_0/helloworld.dfs")
+	for {
+
+	}
+	//dfs.UMountDFS()
+	// localPath2 := "/Users/luorock/Documents/UBCfolder/year4/cpsc416/a2_file_dir_1/"
+	// dfs2, _ := MountDFS(serverAddr, localIP, localPath2)
+	// file2, err := dfs2.Open("helloworld", READ)
+	// if err != nil {
+	// 	fmt.Println(err)
+	// 	return
+	// }
+	// file2.Read(0, &chunk)
+	// fmt.Println(chunk)
+	// file2.Close()
+	// dfs.UMountDFS()
+	// dfs2.UMountDFS()
 }
 
 func TestOpenDread(*testing.T) {

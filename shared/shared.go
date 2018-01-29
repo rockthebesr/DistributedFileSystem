@@ -2,7 +2,7 @@ package shared
 
 type ClientInfo struct {
 	ClientLocalPath string
-	ClientIP        string
+	ClientAddr      string
 }
 
 type ClientID struct {

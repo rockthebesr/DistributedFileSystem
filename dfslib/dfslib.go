@@ -276,6 +276,7 @@ func (dfs DFSInstance) LocalFileExists(fname string) (exists bool, err error) {
 	if !GoodFileName(fname) {
 		return false, BadFilenameError(fname)
 	}
+	fmt.Println("does local file " + dfs.LocalPath + fname + ".dfs exists")
 	if Exists(dfs.LocalPath + fname + ".dfs") {
 		return true, nil
 	}
@@ -354,11 +355,10 @@ func (dfs DFSInstance) Open(fname string, mode FileMode) (f DFSFile, err error) 
 			if err != nil {
 				return nil, err
 			}
-			localExists, err := dfs.LocalFileExists(fname)
-			if err != nil {
-				return nil, err
-			}
+			localExists, _ := dfs.LocalFileExists(fname)
+
 			if localExists {
+				fmt.Println("local file exists")
 				file, _ := os.Open(filePath)
 				result := make([]byte, 8192)
 				copy(result[:], reply.FileData[:])
@@ -366,6 +366,9 @@ func (dfs DFSInstance) Open(fname string, mode FileMode) (f DFSFile, err error) 
 				dfs.FileNameToOSFile[fname] = file
 				return DFSFileStruct{File: file, DFS: dfs, FileMode: READ, FileName: fname, ChunkVersions: reply.ChunkVersions}, nil
 			} else {
+				fmt.Println("local file does not exist")
+
+				dfs.NotifyNewFile(fname)
 				file, _ := os.Create(filePath)
 				result := make([]byte, 8192)
 				copy(result[:], reply.FileData[:])
@@ -409,10 +412,7 @@ func (dfs DFSInstance) Open(fname string, mode FileMode) (f DFSFile, err error) 
 			if err != nil {
 				return nil, err
 			}
-			localExists, err := dfs.LocalFileExists(fname)
-			if err != nil {
-				return nil, err
-			}
+			localExists, _ := dfs.LocalFileExists(fname)
 			if localExists {
 				file, _ := os.Open(filePath)
 				result := make([]byte, 8192)
@@ -421,6 +421,8 @@ func (dfs DFSInstance) Open(fname string, mode FileMode) (f DFSFile, err error) 
 				dfs.FileNameToOSFile[fname] = file
 				return DFSFileStruct{File: file, DFS: dfs, FileMode: READ, FileName: fname, ChunkVersions: reply.ChunkVersions}, nil
 			} else {
+
+				dfs.NotifyNewFile(fname)
 				file, _ := os.Create(filePath)
 				result := make([]byte, 8192)
 				copy(result[:], reply.FileData[:])
@@ -514,23 +516,22 @@ func MountDFS(serverAddr string, localIP string, localPath string) (dfs DFS, err
 	// TODO
 	// For now return LocalPathError
 	// if dfs instance already exists
-
+	fmt.Println("local path is " + localPath)
 	if existDFSInstance != nil {
 		return existDFSInstance, nil
 	}
 	if !Exists(localPath) {
 		return nil, LocalPathError(localPath)
 	}
-	tcpAddr, err := net.ResolveTCPAddr("tcp", localIP+":1111")
+	tcpAddr, err := net.ResolveTCPAddr("tcp", localIP+":0")
 	conn, err := net.Listen("tcp", tcpAddr.String())
 	client := new(ClientStruct)
 	client.LocalPath = localPath
 	rpc.RegisterName("ClientStruct", client)
 	go rpc.Accept(conn)
 	server, err := rpc.Dial("tcp", serverAddr)
-
 	var rep shared.Reply
-	server.Call("ServerStruct.CallClient", shared.ClientInfo{ClientLocalPath: localPath, ClientIP: tcpAddr.String()}, &rep)
+	server.Call("ServerStruct.CallClient", shared.ClientInfo{ClientLocalPath: localPath, ClientAddr: conn.Addr().String()}, &rep)
 	fmt.Println("called server now")
 	isConnected := err != nil
 	localDFSInstance := DFSInstance{IsConnected: isConnected, Server: server, LocalIP: localIP, LocalPath: localPath, Client: client, FileNameToOSFile: map[string]*os.File{}}
