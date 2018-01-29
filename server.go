@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"net"
 	"net/rpc"
+	"os"
 	"strconv"
 
 	"./shared"
@@ -286,15 +287,19 @@ func (s *ServerStruct) GlobalFileExists(args *shared.FileName, reply *shared.Fil
 }
 
 func main() {
+	serverIPAndPort, err := net.ResolveTCPAddr("tcp", os.Args[1])
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
 	dfsServer := new(ServerStruct)
 	dfsServer.ClientInfoToClientID = map[shared.ClientInfo]int{}
 	dfsServer.ClientIDToClientConnection = map[int]*rpc.Client{}
 	dfsServer.ClientIDToFileNameToChunkVersions = map[int]map[string][]int{}
 	dfsServer.GlobalFileToChunksToClientIDs = map[string][][]int{}
 	dfsServer.LockedFileToClientID = map[string]int{}
-	// server := rpc.NewServer()
 	rpc.RegisterName("ServerStruct", dfsServer)
-	l, e := net.Listen("tcp", ":8080")
+	l, e := net.Listen("tcp", serverIPAndPort.String())
 
 	fmt.Println("Starting server" + l.Addr().String())
 	if e != nil {

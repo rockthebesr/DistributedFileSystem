@@ -189,6 +189,7 @@ func (file DFSFileStruct) Write(chunkNum uint8, chunk *Chunk) (err error) {
 }
 
 func (file DFSFileStruct) Close() (err error) {
+	delete(file.DFS.FileNameToOSFile, file.FileName)
 	err = file.File.Close()
 	if err != nil {
 		return err
@@ -245,6 +246,7 @@ type DFSInstance struct {
 	LocalIP                  string
 	LocalFiles               []string
 	LocalFileToChunkVersions map[string][]int
+	FileNameToOSFile         map[string]*os.File
 }
 
 func Exists(path string) bool {
@@ -339,6 +341,7 @@ func (dfs DFSInstance) Open(fname string, mode FileMode) (f DFSFile, err error) 
 			file.Write(bytes)
 			dfs.NotifyNewFile(fname)
 			chunkVersions := [256]int{}
+			dfs.FileNameToOSFile[fname] = file
 			return DFSFileStruct{File: file, DFS: dfs, FileMode: READ, FileName: fname, ChunkVersions: chunkVersions}, nil
 		} else {
 			//TODO
@@ -360,12 +363,14 @@ func (dfs DFSInstance) Open(fname string, mode FileMode) (f DFSFile, err error) 
 				result := make([]byte, 8192)
 				copy(result[:], reply.FileData[:])
 				file.WriteAt(result, 0)
+				dfs.FileNameToOSFile[fname] = file
 				return DFSFileStruct{File: file, DFS: dfs, FileMode: READ, FileName: fname, ChunkVersions: reply.ChunkVersions}, nil
 			} else {
 				file, _ := os.Create(filePath)
 				result := make([]byte, 8192)
 				copy(result[:], reply.FileData[:])
 				file.WriteAt(result, 0)
+				dfs.FileNameToOSFile[fname] = file
 				return DFSFileStruct{File: file, DFS: dfs, FileMode: READ, FileName: fname, ChunkVersions: reply.ChunkVersions}, nil
 			}
 		}
@@ -387,6 +392,7 @@ func (dfs DFSInstance) Open(fname string, mode FileMode) (f DFSFile, err error) 
 				return nil, err
 			}
 			chunkVersions := [256]int{}
+			dfs.FileNameToOSFile[fname] = file
 			return DFSFileStruct{File: file, DFS: dfs, FileMode: WRITE, FileName: fname, ChunkVersions: chunkVersions}, nil
 		} else {
 			//TODO
@@ -412,12 +418,14 @@ func (dfs DFSInstance) Open(fname string, mode FileMode) (f DFSFile, err error) 
 				result := make([]byte, 8192)
 				copy(result[:], reply.FileData[:])
 				file.WriteAt(result, 0)
+				dfs.FileNameToOSFile[fname] = file
 				return DFSFileStruct{File: file, DFS: dfs, FileMode: READ, FileName: fname, ChunkVersions: reply.ChunkVersions}, nil
 			} else {
 				file, _ := os.Create(filePath)
 				result := make([]byte, 8192)
 				copy(result[:], reply.FileData[:])
 				file.WriteAt(result, 0)
+				dfs.FileNameToOSFile[fname] = file
 				return DFSFileStruct{File: file, DFS: dfs, FileMode: READ, FileName: fname, ChunkVersions: reply.ChunkVersions}, nil
 			}
 		}
@@ -429,6 +437,7 @@ func (dfs DFSInstance) Open(fname string, mode FileMode) (f DFSFile, err error) 
 		}
 		filePath := dfs.LocalPath + fname + ".dfs"
 		file, _ := os.Open(filePath)
+		dfs.FileNameToOSFile[fname] = file
 		return DFSFileStruct{File: file, DFS: dfs, FileMode: DREAD, FileName: fname}, nil
 	}
 
@@ -439,6 +448,9 @@ func (dfs DFSInstance) UMountDFS() (err error) {
 	args := shared.ClientID{dfs.Client.ClientID}
 	reply := shared.Reply{false}
 	err = dfs.Server.Call("ServerStruct.CloseClient", args, &reply)
+	for _, file := range dfs.FileNameToOSFile {
+		file.Close()
+	}
 	return err
 }
 
@@ -521,7 +533,7 @@ func MountDFS(serverAddr string, localIP string, localPath string) (dfs DFS, err
 	server.Call("ServerStruct.CallClient", shared.ClientInfo{ClientLocalPath: localPath, ClientIP: tcpAddr.String()}, &rep)
 	fmt.Println("called server now")
 	isConnected := err != nil
-	localDFSInstance := DFSInstance{IsConnected: isConnected, Server: server, LocalIP: localIP, LocalPath: localPath, Client: client}
+	localDFSInstance := DFSInstance{IsConnected: isConnected, Server: server, LocalIP: localIP, LocalPath: localPath, Client: client, FileNameToOSFile: map[string]*os.File{}}
 	existDFSInstance = &localDFSInstance
 	return localDFSInstance, nil
 
