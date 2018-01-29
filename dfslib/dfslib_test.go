@@ -68,7 +68,7 @@ func TestOpenReadNewFile(*testing.T) {
 }
 
 func TestOpenWriteAndReadFile(*testing.T) {
-	serverAddr := "127.0.0.1:8080"
+	serverAddr := "198.162.33.54:8989"
 	localIP := "127.0.0.1"
 	localPath := "/Users/luorock/Documents/UBCfolder/year4/cpsc416/a2_file_dir_0/"
 	dfs, _ := MountDFS(serverAddr, localIP, localPath)
