@@ -137,10 +137,11 @@ type DFSFile interface {
 }
 
 type DFSFileStruct struct {
-	FileName string
-	File     *os.File
-	DFS      DFSInstance
-	FileMode FileMode
+	FileName      string
+	File          *os.File
+	DFS           DFSInstance
+	FileMode      FileMode
+	ChunkVersions [256]int
 }
 
 func (file DFSFileStruct) Read(chunkNum uint8, chunk *Chunk) (err error) {
@@ -150,12 +151,23 @@ func (file DFSFileStruct) Read(chunkNum uint8, chunk *Chunk) (err error) {
 		if err != nil {
 			return err
 		}
-		for _, element := range result {
-			chunk[0] = element
+		for i, element := range result {
+			chunk[i] = element
 		}
 		return nil
 	} else {
 		//TODO: Server check get latest version
+		//DONE
+		args := shared.FileNameAndChunkNumberAndClientID{FileName: file.FileName, ChunkNumber: int(chunkNum), ClientID: file.DFS.ClientID}
+		reply := shared.FileData{[8192]byte{}, [256]int{}}
+		err = file.DFS.Server.Call("ServerStruct.GetLatestChunkRPC", args, &reply)
+		if err != nil {
+			return err
+		} else {
+			for i, element := range reply.Data {
+				chunk[i] = element
+			}
+		}
 		return nil
 	}
 }
@@ -165,15 +177,15 @@ func (file DFSFileStruct) Write(chunkNum uint8, chunk *Chunk) (err error) {
 		return BadFileModeError(file.FileMode)
 	}
 	result := make([]byte, 32)
-	for _, element := range chunk {
-		result[0] = element
-	}
+	copy(result, chunk[:])
 	n, err := file.File.WriteAt(result, int64(chunkNum*32))
 	if err != nil {
 		return err
 	}
 	if n != 0 {
-		//TODO notify chunk version change
+		args := shared.FileNameAndChunkNumberAndClientID{FileName: file.FileName, ChunkNumber: int(chunkNum), ClientID: file.DFS.ClientID}
+		reply := shared.Reply{false}
+		file.DFS.Server.Call("ServerStruct.NotifyChunkVersionUpdate", args, &reply)
 	}
 	return nil
 }
@@ -279,8 +291,9 @@ func (dfs DFSInstance) GlobalFileExists(fname string) (exists bool, err error) {
 	dfs.Server.Call("ServerStruct.GlobalFileExists", args, &reply)
 	if reply.FileExists {
 		return true, nil
+	} else {
+		return false, nil
 	}
-	return false, FileDoesNotExistError(fname)
 }
 
 func (dfs DFSInstance) LockFile(fname string) error {
@@ -315,7 +328,7 @@ func (dfs DFSInstance) Open(fname string, mode FileMode) (f DFSFile, err error) 
 	}
 	switch mode {
 	case READ:
-		fmt.Println("open read file called")
+		fmt.Println("opening " + fname + " in READ mode")
 		//check if file exists globally
 		fileExists, _ := dfs.GlobalFileExists(fname)
 		filePath := dfs.LocalPath + fname + ".dfs"
@@ -327,16 +340,39 @@ func (dfs DFSInstance) Open(fname string, mode FileMode) (f DFSFile, err error) 
 			bytes := make([]byte, 256*32)
 			file.Write(bytes)
 			dfs.NotifyNewFile(fname)
-			return DFSFileStruct{File: file, DFS: dfs, FileMode: READ, FileName: fname}, nil
+			chunkVersions := [256]int{}
+			return DFSFileStruct{File: file, DFS: dfs, FileMode: READ, FileName: fname, ChunkVersions: chunkVersions}, nil
 		} else {
 			//TODO
 			//need to check if file is available
 			//call serverstruct.getFile
-			file, _ := os.Open(filePath)
-			return DFSFileStruct{File: file, DFS: dfs, FileMode: READ, FileName: fname}, nil
+			//Done
+			args := shared.FileNameAndClientID{fname, dfs.ClientID}
+			reply := shared.FileData{[8192]byte{}, [256]int{}}
+			err = dfs.Server.Call("ServerStruct.GetLatestFileRPC", args, &reply)
+			if err != nil {
+				return nil, err
+			}
+			localExists, err := dfs.LocalFileExists(fname)
+			if err != nil {
+				return nil, err
+			}
+			if localExists {
+				file, _ := os.Open(filePath)
+				result := make([]byte, 8192)
+				copy(result[:], reply.Data[:])
+				file.WriteAt(result, 0)
+				return DFSFileStruct{File: file, DFS: dfs, FileMode: READ, FileName: fname, ChunkVersions: reply.ChunkVersions}, nil
+			} else {
+				file, _ := os.Create(filePath)
+				result := make([]byte, 8192)
+				copy(result[:], reply.Data[:])
+				file.WriteAt(result, 0)
+				return DFSFileStruct{File: file, DFS: dfs, FileMode: READ, FileName: fname, ChunkVersions: reply.ChunkVersions}, nil
+			}
 		}
 	case WRITE:
-		fmt.Println("open write file called")
+		fmt.Println("opening " + fname + " in WRITE mode")
 		//check if file exists globally
 		fileExists, _ := dfs.GlobalFileExists(fname)
 		filePath := dfs.LocalPath + fname + ".dfs"
@@ -352,16 +388,44 @@ func (dfs DFSInstance) Open(fname string, mode FileMode) (f DFSFile, err error) 
 			if err != nil {
 				return nil, err
 			}
-			return DFSFileStruct{File: file, DFS: dfs, FileMode: WRITE, FileName: fname}, nil
+			chunkVersions := [256]int{}
+			return DFSFileStruct{File: file, DFS: dfs, FileMode: WRITE, FileName: fname, ChunkVersions: chunkVersions}, nil
 		} else {
 			//TODO
 			//need to check if file is available
 			// call serverstruct.getFile(fname)
 			//call serverstruct.LockFile(fname)
-			file, _ := os.Open(filePath)
-			return DFSFileStruct{File: file, DFS: dfs, FileMode: WRITE, FileName: fname}, nil
+			err = dfs.LockFile(fname)
+			if err != nil {
+				return nil, err
+			}
+			args := shared.FileNameAndClientID{fname, dfs.ClientID}
+			reply := shared.FileData{[8192]byte{}, [256]int{}}
+			err = dfs.Server.Call("ServerStruct.GetLatestFileRPC", args, &reply)
+			if err != nil {
+				return nil, err
+			}
+			localExists, err := dfs.LocalFileExists(fname)
+			if err != nil {
+				return nil, err
+			}
+			if localExists {
+				file, _ := os.Open(filePath)
+				result := make([]byte, 8192)
+				copy(result[:], reply.Data[:])
+				file.WriteAt(result, 0)
+				return DFSFileStruct{File: file, DFS: dfs, FileMode: READ, FileName: fname, ChunkVersions: reply.ChunkVersions}, nil
+			} else {
+				file, _ := os.Create(filePath)
+				result := make([]byte, 8192)
+				copy(result[:], reply.Data[:])
+				file.WriteAt(result, 0)
+				return DFSFileStruct{File: file, DFS: dfs, FileMode: READ, FileName: fname, ChunkVersions: reply.ChunkVersions}, nil
+			}
 		}
 	case DREAD:
+
+		fmt.Println("opening " + fname + " in DREAD mode")
 		if b, _ := dfs.LocalFileExists(fname); !b {
 			return nil, FileDoesNotExistError(fname)
 		}
@@ -374,7 +438,10 @@ func (dfs DFSInstance) Open(fname string, mode FileMode) (f DFSFile, err error) 
 }
 
 func (dfs DFSInstance) UMountDFS() (err error) {
-	return nil
+	args := shared.ClientID{dfs.ClientID}
+	reply := shared.Reply{false}
+	err = dfs.Server.Call("ServerStruct.CloseClient", args, &reply)
+	return err
 }
 
 func (dfs DFSInstance) NotifyNewFile(fileName string) {

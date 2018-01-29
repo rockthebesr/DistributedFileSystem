@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"net"
 	"net/rpc"
+	"strconv"
 
 	"./shared"
 )
@@ -95,12 +96,23 @@ type Server interface {
 	GlobalFileExists(args shared.FileName) shared.FileExists
 }
 type ServerStruct struct {
-	ClientInfoToClientID       map[shared.ClientInfo]int
+	//Client Info Mapped To Client ID
+	ClientInfoToClientID map[shared.ClientInfo]int
+
+	//Client Id Mapped To *rpc.Client
 	ClientIDToClientConnection map[int]*rpc.Client
-	Client                     *rpc.Client
-	GlobalFilesToClientIDs     map[string][]int
-	GlobalFileToChunkVersions  map[string][]int
-	LockedFileToClientID       map[string]int
+
+	//Client Id Mapped To a map of File Name To Chunk Versions
+	ClientIDToFileNameToChunkVersions map[int]map[string][]int
+
+	//Global Files mapped to array of array of Client IDs
+	// example key value: {"helloworld" => [[1, 2], [1,3]]}
+	// This means that for the file "helloworld", for chunk 0 is last updated by client 2
+	// chunk 1 is last updated by client 3
+	GlobalFileToChunksToClientIDs map[string][][]int
+
+	// Locked file to client id of the client that has the lock
+	LockedFileToClientID map[string]int
 }
 
 func (s *ServerStruct) CallClient(args *shared.ClientInfo, reply *shared.Reply) error {
@@ -125,21 +137,103 @@ func (s *ServerStruct) CallClient(args *shared.ClientInfo, reply *shared.Reply) 
 	return nil
 }
 
+func (s *ServerStruct) CloseClient(args *shared.ClientID, reply *shared.Reply) error {
+	if client, ok := s.ClientIDToClientConnection[args.ClientID]; ok {
+		err := client.Close()
+		delete(s.ClientIDToClientConnection, args.ClientID)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *ServerStruct) NotifyNewFile(args *shared.FileNameAndClientID, reply *shared.Reply) error {
 	fmt.Println("notify new file called")
-	if val, ok := s.GlobalFilesToClientIDs[args.FileName]; ok {
-		if !shared.Contains(val, args.ClientID) {
-			val = append(val, args.ClientID)
+	if _, ok := s.GlobalFileToChunksToClientIDs[args.FileName]; !ok {
+		fmt.Println("adding new global file " + args.FileName)
+		val := make([][]int, 256)
+		for i := 0; i < 256; i++ {
+			val[i] = make([]int, 0)
 		}
-		fmt.Println(val)
+		s.GlobalFileToChunksToClientIDs[args.FileName] = val
 		reply.Connected = true
 		return nil
 	} else {
-		s.GlobalFilesToClientIDs[args.FileName] = []int{args.ClientID}
-		fmt.Println(s.GlobalFilesToClientIDs[args.FileName])
+
+		fmt.Println(args.FileName + " did not add")
 		reply.Connected = true
 		return nil
 	}
+}
+
+func (s *ServerStruct) NotifyChunkVersionUpdate(args *shared.FileNameAndChunkNumberAndClientID, reply *shared.Reply) error {
+	fmt.Println("updating file " + args.FileName + " chunk " + strconv.Itoa(args.ChunkNumber))
+	clientIDs := s.GlobalFileToChunksToClientIDs[args.FileName][args.ChunkNumber]
+	s.GlobalFileToChunksToClientIDs[args.FileName][args.ChunkNumber] = append(clientIDs, args.ClientID)
+	s.ClientIDToFileNameToChunkVersions[args.ClientID][args.FileName][args.ChunkNumber] = len(s.GlobalFileToChunksToClientIDs[args.FileName][args.ChunkNumber])
+	reply.Connected = true
+	return nil
+}
+
+func (s *ServerStruct) GetLatestFileRPC(args *shared.FileNameAndClientID, reply *shared.FileData) error {
+	fmt.Println("get latest file " + args.FileName + " for client " + strconv.Itoa(args.ClientID))
+	result, versions, err := s.GetLatestFile(args.FileName, args.ClientID)
+	if err != nil {
+		return err
+	} else {
+		copy(reply.ChunkVersions[:], versions[0:256])
+		copy(reply.Data[0:8192], result[:])
+		return nil
+	}
+}
+
+func (s *ServerStruct) GetLatestChunkRPC(args *shared.FileNameAndChunkNumberAndClientID, reply *shared.ChunkData) error {
+	fmt.Println("get latest chunk " + strconv.Itoa(args.ChunkNumber) + " for file " + args.FileName)
+	result, version, err := s.GetLatestChunk(args.FileName, args.ChunkNumber)
+	if err != nil {
+		return err
+	} else {
+		copy(reply.Data[0:32], result[:])
+		s.ClientIDToFileNameToChunkVersions[args.ClientID][args.FileName][args.ChunkNumber] = version
+		return nil
+	}
+}
+
+func (s *ServerStruct) GetLatestFile(fname string, clientID int) ([8192]byte, [256]int, error) {
+	result := [8192]byte{}
+	versions := [256]int{}
+	for i := 0; i < 256; i++ {
+		data, version, err := s.GetLatestChunk(fname, i)
+		if err != nil {
+			return [8192]byte{}, versions, FileUnavailableError(fname)
+		}
+		copy(result[i*32:(i+1)*32], data[:])
+		versions[i] = version
+	}
+
+	return [8192]byte{}, versions, nil
+}
+
+func (s *ServerStruct) GetLatestChunk(fname string, chunkNumber int) ([32]byte, int, error) {
+
+	data := [32]byte{}
+	chunksToClientIDs := s.GlobalFileToChunksToClientIDs[fname]
+	latestClientIDs := chunksToClientIDs[chunkNumber]
+	for j := len(latestClientIDs) - 1; j >= 0; j-- {
+		if conn, ok := s.ClientIDToClientConnection[latestClientIDs[j]]; ok {
+			args := shared.FileNameAndChunkNumberAndClientID{fname, chunkNumber, latestClientIDs[j]}
+			reply := shared.ChunkData{Data: data}
+			err := conn.Call("ClientStruct.ReadChunk", args, reply)
+			if err != nil {
+				return [32]byte{}, 0, ChunkUnavailableError(chunkNumber)
+			} else {
+				return reply.Data, len(s.GlobalFileToChunksToClientIDs[fname][chunkNumber]), nil
+			}
+		}
+	}
+
+	return [32]byte{}, 0, ChunkUnavailableError(chunkNumber)
 }
 
 func (s *ServerStruct) LockFile(args *shared.FileNameAndClientID, reply *shared.Reply) error {
@@ -161,11 +255,9 @@ func (s *ServerStruct) UnlockFileRPC(args *shared.FileNameAndClientID, reply *sh
 
 func (s *ServerStruct) GlobalFileExists(args *shared.FileName, reply *shared.FileExists) error {
 	fmt.Println("GlobalFileExists called")
-	for fileName, _ := range s.GlobalFilesToClientIDs {
-		if fileName == args.FileName {
-			reply.FileExists = true
-			return nil
-		}
+	if _, ok := s.GlobalFileToChunksToClientIDs[args.FileName]; ok {
+		reply.FileExists = true
+		return nil
 	}
 	return nil
 }
@@ -174,7 +266,8 @@ func main() {
 	dfsServer := new(ServerStruct)
 	dfsServer.ClientInfoToClientID = map[shared.ClientInfo]int{}
 	dfsServer.ClientIDToClientConnection = map[int]*rpc.Client{}
-	dfsServer.GlobalFilesToClientIDs = map[string][]int{}
+	dfsServer.ClientIDToFileNameToChunkVersions = map[int]map[string][]int{}
+	dfsServer.GlobalFileToChunksToClientIDs = map[string][][]int{}
 	dfsServer.LockedFileToClientID = map[string]int{}
 	// server := rpc.NewServer()
 	rpc.RegisterName("ServerStruct", dfsServer)

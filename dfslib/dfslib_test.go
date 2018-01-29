@@ -41,18 +41,22 @@ func TestLocalFileExistst(*testing.T) {
 func TestOpenReadNewFile(*testing.T) {
 	serverAddr := "127.0.0.1:8080"
 	localIP := "127.0.0.1"
-	localPath := "/Users/luorock/Documents/UBCfolder/year4/cpsc416/a2_file_dir_1/"
+	localPath := "/Users/luorock/Documents/UBCfolder/year4/cpsc416/a2_file_dir_0/"
 	dfs, _ := MountDFS(serverAddr, localIP, localPath)
 	localResult, _ := dfs.LocalFileExists("helloworld")
 	fmt.Println("does hello world exist locally?")
 	fmt.Println(localResult)
 	dfs.Open("helloworld", READ)
-	result, _ := dfs.GlobalFileExists("helloworld")
+	result, err := dfs.GlobalFileExists("helloworld")
+	if err != nil {
+		fmt.Println(err)
+	}
 	fmt.Println("does hello world exist globally?")
 	fmt.Println(result)
 	localResult, _ = dfs.LocalFileExists("helloworld")
 	fmt.Println("does hello world exist locally?")
 	fmt.Println(localResult)
+
 }
 
 func TestOpenDread(*testing.T) {
@@ -63,6 +67,10 @@ func TestOpenDread(*testing.T) {
 	localResult, _ := dfs.LocalFileExists("helloworld")
 	fmt.Println("does hello world exist locally?")
 	fmt.Println(localResult)
-	file, _ := dfs.Open("helloworld", DREAD)
+	file, err := dfs.Open("helloworld", DREAD)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
 	file.Close()
 }

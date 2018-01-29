@@ -5,6 +5,10 @@ type ClientInfo struct {
 	ClientIP        string
 }
 
+type ClientID struct {
+	ClientID int
+}
+
 type Reply struct {
 	Connected bool
 }
@@ -20,6 +24,21 @@ type FileExists struct {
 type FileNameAndClientID struct {
 	FileName string
 	ClientID int
+}
+
+type FileNameAndChunkNumberAndClientID struct {
+	FileName    string
+	ChunkNumber int
+	ClientID    int
+}
+
+type FileData struct {
+	Data          [32 * 256]byte
+	ChunkVersions [256]int
+}
+
+type ChunkData struct {
+	Data [32]byte
 }
 
 func Contains(s []int, e int) bool {
