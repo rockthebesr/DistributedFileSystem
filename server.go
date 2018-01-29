@@ -127,7 +127,7 @@ func (s *ServerStruct) CallClient(args *shared.ClientInfo, reply *shared.Reply) 
 	}
 	newReply := shared.Reply{Connected: false}
 	for clientInfo, id := range s.ClientInfoToClientID {
-		if clientInfo.ClientLocalPath == args.ClientLocalPath && clientInfo.ClientAddr == args.ClientAddr {
+		if clientInfo.ClientLocalPath == args.ClientLocalPath && clientInfo.ClientIP == args.ClientIP {
 
 			fmt.Println("adding existing clientID " + strconv.Itoa(id))
 			client.Call("ClientStruct.PrintClientID", id, &newReply)
@@ -207,7 +207,7 @@ func (s *ServerStruct) GetLatestFileRPC(args *shared.FileNameAndClientID, reply 
 
 func (s *ServerStruct) GetLatestChunkRPC(args *shared.FileNameAndChunkNumberAndClientID, reply *shared.ChunkData) error {
 	fmt.Println("get latest chunk " + strconv.Itoa(args.ChunkNumber) + " for file " + args.FileName)
-	result, version, err := s.GetLatestChunk(args.FileName, args.ChunkNumber)
+	result, version, err := s.GetLatestChunk(args.FileName, args.ClientID, args.ChunkNumber)
 	if err != nil {
 		return err
 	} else {
@@ -221,7 +221,7 @@ func (s *ServerStruct) GetLatestFile(fname string, clientID int) ([8192]byte, [2
 	result := [8192]byte{}
 	versions := [256]int{}
 	for i := 0; i < 256; i++ {
-		data, version, err := s.GetLatestChunk(fname, i)
+		data, version, err := s.GetLatestChunk(fname, clientID, i)
 		if err != nil {
 			return [8192]byte{}, versions, FileUnavailableError(fname)
 		}
@@ -232,7 +232,7 @@ func (s *ServerStruct) GetLatestFile(fname string, clientID int) ([8192]byte, [2
 	return [8192]byte{}, versions, nil
 }
 
-func (s *ServerStruct) GetLatestChunk(fname string, chunkNumber int) ([32]byte, int, error) {
+func (s *ServerStruct) GetLatestChunk(fname string, clientID int, chunkNumber int) ([32]byte, int, error) {
 
 	data := [32]byte{}
 	chunksToClientIDs := s.GlobalFileToChunksToClientIDs[fname]
@@ -240,7 +240,22 @@ func (s *ServerStruct) GetLatestChunk(fname string, chunkNumber int) ([32]byte, 
 	if len(latestClientIDs) == 0 {
 		return data, 0, nil
 	}
-	for j := len(latestClientIDs) - 1; j >= 0; j-- {
+	currentVersion := s.ClientIDToFileNameToChunkVersions[clientID][fname][chunkNumber]
+	println("current version " + fname + strconv.Itoa(chunkNumber) + ": " + strconv.Itoa(currentVersion))
+	if currentVersion >= len(latestClientIDs) {
+		if conn, ok := s.ClientIDToClientConnection[clientID]; ok {
+			args := shared.FileNameAndChunkNumberAndClientID{fname, chunkNumber, clientID}
+			reply := shared.ChunkData{ChunkData: data}
+			err := conn.Call("ClientStruct.ReadChunk", args, &reply)
+			if err != nil {
+				fmt.Println(err)
+				return [32]byte{}, 0, ChunkUnavailableError(chunkNumber)
+			} else {
+				return reply.ChunkData, len(s.GlobalFileToChunksToClientIDs[fname][chunkNumber]), nil
+			}
+		}
+	}
+	for j := len(latestClientIDs) - 1; j >= currentVersion; j-- {
 		// fmt.Println("latest updated client for file " + fname + " chunk " + strconv.Itoa(chunkNumber) + " is " + strconv.Itoa(latestClientIDs[j]))
 		if conn, ok := s.ClientIDToClientConnection[latestClientIDs[j]]; ok {
 			args := shared.FileNameAndChunkNumberAndClientID{fname, chunkNumber, latestClientIDs[j]}

@@ -51,6 +51,9 @@ func TestOpenReadNewFile(*testing.T) {
 		fmt.Println(err)
 		return
 	}
+	var chunk Chunk
+	file.Read(0, &chunk)
+	fmt.Println(chunk)
 	file.Close()
 	result, err := dfs.GlobalFileExists("helloworld")
 	if err != nil {

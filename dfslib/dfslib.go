@@ -349,33 +349,30 @@ func (dfs DFSInstance) Open(fname string, mode FileMode) (f DFSFile, err error) 
 			//need to check if file is available
 			//call serverstruct.getFile
 			//Done
+
+			localExists, _ := dfs.LocalFileExists(fname)
+			var file *os.File
+			if localExists {
+				fmt.Println("local file exists")
+				file, _ = os.Open(filePath)
+			} else {
+				fmt.Println("local file does not exist")
+				dfs.NotifyNewFile(fname)
+			}
 			args := shared.FileNameAndClientID{fname, dfs.Client.ClientID}
 			reply := shared.FileData{[8192]byte{}, [256]int{}}
 			err = dfs.Server.Call("ServerStruct.GetLatestFileRPC", args, &reply)
 			if err != nil {
 				return nil, err
 			}
-			localExists, _ := dfs.LocalFileExists(fname)
-
-			if localExists {
-				fmt.Println("local file exists")
-				file, _ := os.Open(filePath)
-				result := make([]byte, 8192)
-				copy(result[:], reply.FileData[:])
-				file.WriteAt(result, 0)
-				dfs.FileNameToOSFile[fname] = file
-				return DFSFileStruct{File: file, DFS: dfs, FileMode: READ, FileName: fname, ChunkVersions: reply.ChunkVersions}, nil
-			} else {
-				fmt.Println("local file does not exist")
-
-				dfs.NotifyNewFile(fname)
-				file, _ := os.Create(filePath)
-				result := make([]byte, 8192)
-				copy(result[:], reply.FileData[:])
-				file.WriteAt(result, 0)
-				dfs.FileNameToOSFile[fname] = file
-				return DFSFileStruct{File: file, DFS: dfs, FileMode: READ, FileName: fname, ChunkVersions: reply.ChunkVersions}, nil
+			if !localExists {
+				file, _ = os.Create(filePath)
 			}
+			result := make([]byte, 8192)
+			copy(result[:], reply.FileData[:])
+			file.WriteAt(result, 0)
+			dfs.FileNameToOSFile[fname] = file
+			return DFSFileStruct{File: file, DFS: dfs, FileMode: READ, FileName: fname, ChunkVersions: reply.ChunkVersions}, nil
 		}
 	case WRITE:
 		fmt.Println("opening " + fname + " in WRITE mode")
@@ -402,9 +399,15 @@ func (dfs DFSInstance) Open(fname string, mode FileMode) (f DFSFile, err error) 
 			//need to check if file is available
 			// call serverstruct.getFile(fname)
 			//call serverstruct.LockFile(fname)
-			err = dfs.LockFile(fname)
-			if err != nil {
-				return nil, err
+
+			localExists, _ := dfs.LocalFileExists(fname)
+			var file *os.File
+			if localExists {
+				fmt.Println("local file exists")
+				file, _ = os.Open(filePath)
+			} else {
+				fmt.Println("local file does not exist")
+				dfs.NotifyNewFile(fname)
 			}
 			args := shared.FileNameAndClientID{fname, dfs.Client.ClientID}
 			reply := shared.FileData{[8192]byte{}, [256]int{}}
@@ -412,24 +415,15 @@ func (dfs DFSInstance) Open(fname string, mode FileMode) (f DFSFile, err error) 
 			if err != nil {
 				return nil, err
 			}
-			localExists, _ := dfs.LocalFileExists(fname)
-			if localExists {
-				file, _ := os.Open(filePath)
-				result := make([]byte, 8192)
-				copy(result[:], reply.FileData[:])
-				file.WriteAt(result, 0)
-				dfs.FileNameToOSFile[fname] = file
-				return DFSFileStruct{File: file, DFS: dfs, FileMode: READ, FileName: fname, ChunkVersions: reply.ChunkVersions}, nil
-			} else {
-
-				dfs.NotifyNewFile(fname)
-				file, _ := os.Create(filePath)
-				result := make([]byte, 8192)
-				copy(result[:], reply.FileData[:])
-				file.WriteAt(result, 0)
-				dfs.FileNameToOSFile[fname] = file
-				return DFSFileStruct{File: file, DFS: dfs, FileMode: READ, FileName: fname, ChunkVersions: reply.ChunkVersions}, nil
+			if !localExists {
+				file, _ = os.Create(filePath)
 			}
+			result := make([]byte, 8192)
+			copy(result[:], reply.FileData[:])
+			file.WriteAt(result, 0)
+			dfs.FileNameToOSFile[fname] = file
+			return DFSFileStruct{File: file, DFS: dfs, FileMode: WRITE, FileName: fname, ChunkVersions: reply.ChunkVersions}, nil
+
 		}
 	case DREAD:
 
@@ -531,7 +525,7 @@ func MountDFS(serverAddr string, localIP string, localPath string) (dfs DFS, err
 	go rpc.Accept(conn)
 	server, err := rpc.Dial("tcp", serverAddr)
 	var rep shared.Reply
-	server.Call("ServerStruct.CallClient", shared.ClientInfo{ClientLocalPath: localPath, ClientAddr: conn.Addr().String()}, &rep)
+	server.Call("ServerStruct.CallClient", shared.ClientInfo{ClientLocalPath: localPath, ClientAddr: conn.Addr().String(), ClientIP: localIP}, &rep)
 	fmt.Println("called server now")
 	isConnected := err != nil
 	localDFSInstance := DFSInstance{IsConnected: isConnected, Server: server, LocalIP: localIP, LocalPath: localPath, Client: client, FileNameToOSFile: map[string]*os.File{}}
