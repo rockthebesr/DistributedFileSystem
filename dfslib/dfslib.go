@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/rpc"
 	"os"
+	"time"
 	"unicode"
 
 	"../shared"
@@ -145,6 +146,9 @@ type DFSFileStruct struct {
 }
 
 func (file DFSFileStruct) Read(chunkNum uint8, chunk *Chunk) (err error) {
+	if !file.DFS.IsConnected {
+		return DisconnectedError(file.DFS.ServerAddr)
+	}
 	result := make([]byte, 32)
 	if file.FileMode == DREAD {
 		_, err = file.File.ReadAt(result, int64(chunkNum*32))
@@ -171,6 +175,9 @@ func (file DFSFileStruct) Read(chunkNum uint8, chunk *Chunk) (err error) {
 }
 
 func (file DFSFileStruct) Write(chunkNum uint8, chunk *Chunk) (err error) {
+	if !file.DFS.IsConnected {
+		return DisconnectedError(file.DFS.ServerAddr)
+	}
 	if file.FileMode != WRITE {
 		return BadFileModeError(file.FileMode)
 	}
@@ -189,6 +196,9 @@ func (file DFSFileStruct) Write(chunkNum uint8, chunk *Chunk) (err error) {
 }
 
 func (file DFSFileStruct) Close() (err error) {
+	if !file.DFS.IsConnected {
+		return DisconnectedError(file.DFS.ServerAddr)
+	}
 	delete(file.DFS.FileNameToOSFile, file.FileName)
 	err = file.File.Close()
 	if err != nil {
@@ -242,6 +252,7 @@ type DFSInstance struct {
 	Client                   *ClientStruct
 	IsConnected              bool
 	Server                   *rpc.Client
+	ServerAddr               string
 	LocalPath                string
 	LocalIP                  string
 	LocalFiles               []string
@@ -284,6 +295,9 @@ func (dfs DFSInstance) LocalFileExists(fname string) (exists bool, err error) {
 }
 
 func (dfs DFSInstance) GlobalFileExists(fname string) (exists bool, err error) {
+	if !dfs.IsConnected {
+		return false, DisconnectedError(dfs.ServerAddr)
+	}
 	if !GoodFileName(fname) {
 		return false, BadFilenameError(fname)
 	}
@@ -324,6 +338,9 @@ func (dfs DFSInstance) UnlockFile(fname string) error {
 // - BadFilenameError (if filename contains non alpha-numeric chars or is not 1-16 chars long)
 
 func (dfs DFSInstance) Open(fname string, mode FileMode) (f DFSFile, err error) {
+	if !dfs.IsConnected {
+		return nil, DisconnectedError(dfs.ServerAddr)
+	}
 	if !GoodFileName(fname) {
 		return nil, BadFilenameError(fname)
 	}
@@ -400,6 +417,10 @@ func (dfs DFSInstance) Open(fname string, mode FileMode) (f DFSFile, err error) 
 			// call serverstruct.getFile(fname)
 			//call serverstruct.LockFile(fname)
 
+			err = dfs.LockFile(fname)
+			if err != nil {
+				return nil, err
+			}
 			localExists, _ := dfs.LocalFileExists(fname)
 			var file *os.File
 			if localExists {
@@ -441,6 +462,9 @@ func (dfs DFSInstance) Open(fname string, mode FileMode) (f DFSFile, err error) 
 }
 
 func (dfs DFSInstance) UMountDFS() (err error) {
+	if !dfs.IsConnected {
+		return DisconnectedError(dfs.ServerAddr)
+	}
 	args := shared.ClientID{dfs.Client.ClientID}
 	reply := shared.Reply{false}
 	err = dfs.Server.Call("ServerStruct.CloseClient", args, &reply)
@@ -489,6 +513,35 @@ func (c *ClientStruct) ReadChunk(args *shared.FileNameAndChunkNumberAndClientID,
 	return nil
 }
 
+func DoEvery(d time.Duration, f func()) {
+	for _ = range time.Tick(d) {
+		f()
+	}
+}
+
+func (dfs DFSInstance) NotifyServerClientConnected() {
+	if dfs.IsConnected {
+		args := shared.ClientID{dfs.Client.ClientID}
+		reply := shared.Reply{false}
+		err := dfs.Server.Call("ServerStruct.NotifyClientConnected", args, &reply)
+		if err != nil || !reply.Connected {
+			dfs.IsConnected = false
+		}
+	} else {
+		tcpAddr, err := net.ResolveTCPAddr("tcp", dfs.LocalIP+":0")
+		conn, err := net.Listen("tcp", tcpAddr.String())
+		client := new(ClientStruct)
+		client.LocalPath = dfs.LocalPath
+		rpc.RegisterName("ClientStruct", client)
+		go rpc.Accept(conn)
+		server, err := rpc.Dial("tcp", dfs.ServerAddr)
+		var rep shared.Reply
+		err = server.Call("ServerStruct.CallClient", shared.ClientInfo{ClientLocalPath: dfs.LocalPath, ClientAddr: conn.Addr().String(), ClientIP: dfs.LocalIP}, &rep)
+		fmt.Println("called server now")
+		dfs.IsConnected = err == nil
+	}
+}
+
 // The constructor for a new DFS object instance. Takes the server's
 // IP:port address string as parameter, the localIP to use to
 // establish the connection to the server, and a localPath path on the
@@ -527,9 +580,16 @@ func MountDFS(serverAddr string, localIP string, localPath string) (dfs DFS, err
 	var rep shared.Reply
 	server.Call("ServerStruct.CallClient", shared.ClientInfo{ClientLocalPath: localPath, ClientAddr: conn.Addr().String(), ClientIP: localIP}, &rep)
 	fmt.Println("called server now")
-	isConnected := err != nil
-	localDFSInstance := DFSInstance{IsConnected: isConnected, Server: server, LocalIP: localIP, LocalPath: localPath, Client: client, FileNameToOSFile: map[string]*os.File{}}
+	isConnected := err == nil
+	localDFSInstance := DFSInstance{IsConnected: isConnected, Server: server, ServerAddr: serverAddr, LocalIP: localIP, LocalPath: localPath, Client: client, FileNameToOSFile: map[string]*os.File{}}
 	existDFSInstance = &localDFSInstance
+	// DoEvery(time.Second, localDFSInstance.NotifyServerClientConnected)
+	go func() {
+		for {
+			<-time.After(time.Second)
+			localDFSInstance.NotifyServerClientConnected()
+		}
+	}()
 	return localDFSInstance, nil
 
 }

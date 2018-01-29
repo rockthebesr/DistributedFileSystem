@@ -8,6 +8,7 @@ import (
 	"net/rpc"
 	"os"
 	"strconv"
+	"time"
 
 	"./shared"
 )
@@ -103,6 +104,8 @@ type ServerStruct struct {
 	//Client Id Mapped To *rpc.Client
 	ClientIDToClientConnection map[int]*rpc.Client
 
+	ClientIDToLastConnected map[int]time.Time
+
 	//Client Id Mapped To a map of File Name To Chunk Versions
 	ClientIDToFileNameToChunkVersions map[int]map[string][]int
 
@@ -133,6 +136,7 @@ func (s *ServerStruct) CallClient(args *shared.ClientInfo, reply *shared.Reply) 
 			client.Call("ClientStruct.PrintClientID", id, &newReply)
 			*reply = shared.Reply{true}
 			s.ClientIDToClientConnection[id] = client
+			s.ClientIDToLastConnected[id] = time.Now()
 			return nil
 		}
 	}
@@ -143,6 +147,7 @@ func (s *ServerStruct) CallClient(args *shared.ClientInfo, reply *shared.Reply) 
 	client.Call("ClientStruct.PrintClientID", newID, &newReply)
 	fmt.Println("adding clientID " + strconv.Itoa(newID))
 	*reply = shared.Reply{true}
+	s.ClientIDToLastConnected[newID] = time.Now()
 	return nil
 }
 
@@ -157,8 +162,13 @@ func (s *ServerStruct) CloseClient(args *shared.ClientID, reply *shared.Reply) e
 	return nil
 }
 
+func (s *ServerStruct) NotifyClientConnected(args *shared.ClientID, reply *shared.Reply) error {
+	s.ClientIDToLastConnected[args.ClientID] = time.Now()
+	reply.Connected = true
+	return nil
+}
+
 func (s *ServerStruct) NotifyNewFile(args *shared.FileNameAndClientID, reply *shared.Reply) error {
-	fmt.Println("notify new file called")
 	if _, ok := s.GlobalFileToChunksToClientIDs[args.FileName]; !ok {
 		fmt.Println("adding new global file " + args.FileName)
 		chunksToClientIDs := make([][]int, 256)
@@ -169,8 +179,7 @@ func (s *ServerStruct) NotifyNewFile(args *shared.FileNameAndClientID, reply *sh
 		s.GlobalFileToChunksToClientIDs[args.FileName] = chunksToClientIDs
 
 	} else {
-
-		fmt.Println(args.FileName + " did not add")
+		fmt.Println(args.FileName + " exists globally")
 		reply.Connected = true
 	}
 	chunkVersions := make([]int, 256)
@@ -294,6 +303,14 @@ func (s *ServerStruct) UnlockFileRPC(args *shared.FileNameAndClientID, reply *sh
 	return nil
 }
 
+func (s *ServerStruct) UnlockFilesOfClient(clientID int) {
+	for file, value := range s.LockedFileToClientID {
+		if value == clientID {
+			delete(s.LockedFileToClientID, file)
+		}
+	}
+}
+
 func (s *ServerStruct) GlobalFileExists(args *shared.FileName, reply *shared.FileExists) error {
 	fmt.Println("GlobalFileExists called")
 	if _, ok := s.GlobalFileToChunksToClientIDs[args.FileName]; ok {
@@ -301,6 +318,28 @@ func (s *ServerStruct) GlobalFileExists(args *shared.FileName, reply *shared.Fil
 		return nil
 	}
 	return nil
+}
+
+func DoEvery(d time.Duration, f func()) {
+	for _ = range time.Tick(d) {
+		f()
+	}
+}
+
+func (s *ServerStruct) RemoveDisconnectedClients() {
+	twoSAgo := time.Now().Add(-2 * time.Second)
+	for clientID, t := range s.ClientIDToLastConnected {
+		if t.Before(twoSAgo) {
+			delete(s.ClientIDToLastConnected, clientID)
+			fmt.Println("Disconnecting client " + strconv.Itoa(clientID))
+			client := s.ClientIDToClientConnection[clientID]
+			if client != nil {
+				_ = client.Close()
+			}
+			delete(s.ClientIDToClientConnection, clientID)
+			s.UnlockFilesOfClient(clientID)
+		}
+	}
 }
 
 func main() {
@@ -315,10 +354,18 @@ func main() {
 	dfsServer.ClientIDToFileNameToChunkVersions = map[int]map[string][]int{}
 	dfsServer.GlobalFileToChunksToClientIDs = map[string][][]int{}
 	dfsServer.LockedFileToClientID = map[string]int{}
+	dfsServer.ClientIDToLastConnected = map[int]time.Time{}
 	rpc.RegisterName("ServerStruct", dfsServer)
 
 	fmt.Println("Starting server " + serverIPAndPort.String())
 
+	// DoEvery(2*time.Second, dfsServer.RemoveDisconnectedClients)
+	go func() {
+		for {
+			<-time.After(2 * time.Second)
+			go dfsServer.RemoveDisconnectedClients()
+		}
+	}()
 	l, e := net.Listen("tcp", serverIPAndPort.String())
 	if e != nil {
 		log.Fatal("listen error:", e)

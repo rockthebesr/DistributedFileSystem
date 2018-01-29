@@ -75,24 +75,24 @@ func TestOpenWriteAndReadFile(*testing.T) {
 	localResult, _ := dfs.LocalFileExists("helloworld")
 	if localResult {
 		fmt.Println("delete a2_file_dir_0/helloworld before running this test")
-		return
+		// return
 	}
-	file, _ := dfs.Open("helloworld", WRITE)
-	byteArray := [32]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
-	var chunk Chunk
-	copy(chunk[:], byteArray[:])
-	err := file.Write(0, &chunk)
+	_, err := dfs.Open("helloworld", WRITE)
+	// byteArray := [32]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+	// var chunk Chunk
+	// copy(chunk[:], byteArray[:])
+	// err := file.Write(0, &chunk)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
-	err = file.Read(0, &chunk)
-	fmt.Println(chunk)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	file.Close()
+	// err = file.Read(0, &chunk)
+	// fmt.Println(chunk)
+	// if err != nil {
+	// 	fmt.Println(err)
+	// 	return
+	// }
+	// file.Close()
 	for {
 
 	}
