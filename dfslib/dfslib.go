@@ -143,12 +143,11 @@ type DFSFileStruct struct {
 	DFS           DFSInstance
 	FileMode      FileMode
 	ChunkVersions [256]int
+	IsConnected   bool
 }
 
 func (file DFSFileStruct) Read(chunkNum uint8, chunk *Chunk) (err error) {
-	if !file.DFS.IsConnected {
-		return DisconnectedError(file.DFS.ServerAddr)
-	}
+
 	result := make([]byte, 32)
 	if file.FileMode == DREAD {
 		_, err = file.File.ReadAt(result, int64(chunkNum*32))
@@ -160,6 +159,15 @@ func (file DFSFileStruct) Read(chunkNum uint8, chunk *Chunk) (err error) {
 		}
 		return nil
 	} else {
+		if !file.DFS.IsConnected {
+			file.IsConnected = false
+			delete(file.DFS.FileNameToOSFile, file.FileName)
+			file.File.Close()
+			return DisconnectedError(file.DFS.ServerAddr)
+		}
+		if !file.IsConnected {
+			return DisconnectedError(file.DFS.ServerAddr)
+		}
 		args := shared.FileNameAndChunkNumberAndClientID{FileName: file.FileName, ChunkNumber: int(chunkNum), ClientID: file.DFS.Client.ClientID}
 		reply := shared.ChunkData{ChunkData: [32]byte{}}
 		err = file.DFS.Server.Call("ServerStruct.GetLatestChunkRPC", args, &reply)
@@ -175,11 +183,18 @@ func (file DFSFileStruct) Read(chunkNum uint8, chunk *Chunk) (err error) {
 }
 
 func (file DFSFileStruct) Write(chunkNum uint8, chunk *Chunk) (err error) {
-	if !file.DFS.IsConnected {
-		return DisconnectedError(file.DFS.ServerAddr)
-	}
+
 	if file.FileMode != WRITE {
 		return BadFileModeError(file.FileMode)
+	}
+	if !file.DFS.IsConnected {
+		file.IsConnected = false
+		delete(file.DFS.FileNameToOSFile, file.FileName)
+		file.File.Close()
+		return DisconnectedError(file.DFS.ServerAddr)
+	}
+	if !file.IsConnected {
+		return DisconnectedError(file.DFS.ServerAddr)
 	}
 	result := make([]byte, 32)
 	copy(result, chunk[:])
@@ -196,8 +211,16 @@ func (file DFSFileStruct) Write(chunkNum uint8, chunk *Chunk) (err error) {
 }
 
 func (file DFSFileStruct) Close() (err error) {
-	if !file.DFS.IsConnected {
-		return DisconnectedError(file.DFS.ServerAddr)
+	if file.FileMode != DREAD {
+		if !file.DFS.IsConnected {
+			file.IsConnected = false
+			delete(file.DFS.FileNameToOSFile, file.FileName)
+			file.File.Close()
+			return DisconnectedError(file.DFS.ServerAddr)
+		}
+		if !file.IsConnected {
+			return DisconnectedError(file.DFS.ServerAddr)
+		}
 	}
 	delete(file.DFS.FileNameToOSFile, file.FileName)
 	err = file.File.Close()
@@ -360,7 +383,7 @@ func (dfs DFSInstance) Open(fname string, mode FileMode) (f DFSFile, err error) 
 			dfs.NotifyNewFile(fname)
 			chunkVersions := [256]int{}
 			dfs.FileNameToOSFile[fname] = file
-			return DFSFileStruct{File: file, DFS: dfs, FileMode: READ, FileName: fname, ChunkVersions: chunkVersions}, nil
+			return DFSFileStruct{File: file, DFS: dfs, FileMode: READ, FileName: fname, ChunkVersions: chunkVersions, IsConnected: true}, nil
 		} else {
 			//TODO
 			//need to check if file is available
@@ -389,7 +412,7 @@ func (dfs DFSInstance) Open(fname string, mode FileMode) (f DFSFile, err error) 
 			copy(result[:], reply.FileData[:])
 			file.WriteAt(result, 0)
 			dfs.FileNameToOSFile[fname] = file
-			return DFSFileStruct{File: file, DFS: dfs, FileMode: READ, FileName: fname, ChunkVersions: reply.ChunkVersions}, nil
+			return DFSFileStruct{File: file, DFS: dfs, FileMode: READ, FileName: fname, ChunkVersions: reply.ChunkVersions, IsConnected: true}, nil
 		}
 	case WRITE:
 		fmt.Println("opening " + fname + " in WRITE mode")
@@ -410,7 +433,7 @@ func (dfs DFSInstance) Open(fname string, mode FileMode) (f DFSFile, err error) 
 			}
 			chunkVersions := [256]int{}
 			dfs.FileNameToOSFile[fname] = file
-			return DFSFileStruct{File: file, DFS: dfs, FileMode: WRITE, FileName: fname, ChunkVersions: chunkVersions}, nil
+			return DFSFileStruct{File: file, DFS: dfs, FileMode: WRITE, FileName: fname, ChunkVersions: chunkVersions, IsConnected: true}, nil
 		} else {
 			//TODO
 			//need to check if file is available
@@ -443,7 +466,7 @@ func (dfs DFSInstance) Open(fname string, mode FileMode) (f DFSFile, err error) 
 			copy(result[:], reply.FileData[:])
 			file.WriteAt(result, 0)
 			dfs.FileNameToOSFile[fname] = file
-			return DFSFileStruct{File: file, DFS: dfs, FileMode: WRITE, FileName: fname, ChunkVersions: reply.ChunkVersions}, nil
+			return DFSFileStruct{File: file, DFS: dfs, FileMode: WRITE, FileName: fname, ChunkVersions: reply.ChunkVersions, IsConnected: true}, nil
 
 		}
 	case DREAD:
@@ -455,22 +478,23 @@ func (dfs DFSInstance) Open(fname string, mode FileMode) (f DFSFile, err error) 
 		filePath := dfs.LocalPath + fname + ".dfs"
 		file, _ := os.Open(filePath)
 		dfs.FileNameToOSFile[fname] = file
-		return DFSFileStruct{File: file, DFS: dfs, FileMode: DREAD, FileName: fname}, nil
+		return DFSFileStruct{File: file, DFS: dfs, FileMode: DREAD, FileName: fname, IsConnected: false}, nil
 	}
 
 	return nil, nil
 }
 
 func (dfs DFSInstance) UMountDFS() (err error) {
+	for _, file := range dfs.FileNameToOSFile {
+		file.Close()
+	}
 	if !dfs.IsConnected {
 		return DisconnectedError(dfs.ServerAddr)
 	}
 	args := shared.ClientID{dfs.Client.ClientID}
 	reply := shared.Reply{false}
 	err = dfs.Server.Call("ServerStruct.CloseClient", args, &reply)
-	for _, file := range dfs.FileNameToOSFile {
-		file.Close()
-	}
+
 	return err
 }
 
