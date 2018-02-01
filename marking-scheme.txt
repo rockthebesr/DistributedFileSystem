@@ -1,0 +1,13 @@
+Total mark: [100/100]
+---------------------------------------------------
+
+Connected operation [60/100
+* One client; example scenarios [20/100]
+* One reader/writer client and one writer client; example scenarios [20/100]
+* Multiple reader clients and one writer client; example scenarios [20/100]
+
+Disconnected operation [40/100]
+* One client; example scenarios [20/100]
+* One reader/writer client and one writer client; example scenarios [10/100]
+* Multiple reader clients and one writer client; example scenarios [10/100]
+
